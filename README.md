@@ -115,6 +115,9 @@ FRONTEND_URL=http://localhost:5173
 
 # Webhook URL for Telegram bots (without trailing slash)
 WEBHOOK_URL=https://yourdomain.com
+
+# Node Environment (development/production)
+NODE_ENV=development
 ```
 
 ### 3. Database Setup
@@ -137,6 +140,22 @@ cd ../frontend
 
 # Install dependencies
 npm install
+
+# Create environment file
+cp .env.example .env
+```
+
+Edit frontend `.env` file:
+
+```env
+# Backend API URL
+VITE_API_URL=http://localhost:3001
+
+# WebSocket URL (same as API URL)
+VITE_WS_URL=http://localhost:3001
+
+# Frontend Port
+PORT=5173
 ```
 
 ## 🏃 Running the Application
@@ -162,6 +181,10 @@ Frontend will run on `http://localhost:5173`
 **Backend:**
 ```bash
 cd backend
+
+# Set NODE_ENV to production in .env
+# NODE_ENV=production
+
 npm run build
 npm run start:prod
 ```
@@ -169,9 +192,22 @@ npm run start:prod
 **Frontend:**
 ```bash
 cd frontend
+
+# Update .env with production URLs
+# VITE_API_URL=https://your-api-domain.com
+# VITE_WS_URL=https://your-api-domain.com
+# PORT=3000 (or your preferred port)
+
 npm run build
 npm start
 ```
+
+**⚠️ Production Notes:**
+- Backend automatically disables database query logging when `NODE_ENV=production`
+- Database synchronize is disabled in production (use migrations instead)
+- Ensure all environment variables are properly set
+- Use process managers like PM2 for production deployments
+- Configure proper SSL certificates for HTTPS
 
 ## ⚙️ Configuration
 
