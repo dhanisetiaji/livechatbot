@@ -156,6 +156,14 @@ VITE_WS_URL=http://localhost:3001
 
 # Frontend Port
 PORT=5173
+
+# Base Path (use / for root, or /livechat for subdirectory)
+VITE_BASE_PATH=/
+```
+
+**Note:** If deploying to a subdirectory (e.g., `https://yourdomain.com/livechat`), set:
+```env
+VITE_BASE_PATH=/livechat
 ```
 
 ## 🏃 Running the Application
@@ -174,7 +182,7 @@ Backend will run on `http://localhost:3001`
 cd frontend
 npm run dev
 ```
-Frontend will run on `http://localhost:5173`
+Frontend will run on `http://localhost:5173` (or the PORT specified in `.env`)
 
 ### Production Mode
 
@@ -199,7 +207,12 @@ cd frontend
 # PORT=3000 (or your preferred port)
 
 npm run build
+
+# Start with .env file (reads PORT from .env)
 npm start
+
+# OR start with custom port
+npm run start:prod
 ```
 
 **⚠️ Production Notes:**
@@ -208,6 +221,59 @@ npm start
 - Ensure all environment variables are properly set
 - Use process managers like PM2 for production deployments
 - Configure proper SSL certificates for HTTPS
+
+### Deploying to Subdirectory
+
+If deploying frontend to a subdirectory (e.g., `https://yourdomain.com/livechat`):
+
+1. **Set Base Path in `.env`:**
+```env
+VITE_BASE_PATH=/livechat
+```
+
+2. **Rebuild the application:**
+```bash
+npm run build
+```
+
+3. **Configure your web server (Nginx example):**
+```nginx
+# Frontend at /livechat
+location /livechat {
+    alias /path/to/your/frontend/build/client;
+    try_files $uri $uri/ /livechat/index.html;
+}
+
+# API requests
+location /api {
+    proxy_pass http://localhost:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection 'upgrade';
+    proxy_set_header Host $host;
+    proxy_cache_bypass $http_upgrade;
+}
+
+# WebSocket
+location /socket.io {
+    proxy_pass http://localhost:3001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+4. **For Apache (.htaccess):**
+```apache
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /livechat/
+    RewriteRule ^index\.html$ - [L]
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule . /livechat/index.html [L]
+</IfModule>
+```
 
 ## ⚙️ Configuration
 
