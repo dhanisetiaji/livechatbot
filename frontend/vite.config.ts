@@ -4,11 +4,13 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
+  const basePath = env.VITE_BASE_PATH || '/';
   
   return {
-    base: env.VITE_BASE_PATH || '/',
+    base: basePath,
     plugins: [
       remix({
+        basename: basePath,
         future: {
           v3_fetcherPersist: true,
           v3_relativeSplatPath: true,
