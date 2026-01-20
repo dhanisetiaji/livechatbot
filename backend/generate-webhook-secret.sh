@@ -1,0 +1,30 @@
+#!/bin/bash
+
+# Generate Random Secret Token untuk Telegram Webhook
+SECRET=$(openssl rand -hex 32)
+
+echo "======================================"
+echo "Telegram Webhook Secret Token"
+echo "======================================"
+echo ""
+echo "Generated Secret Token:"
+echo "$SECRET"
+echo ""
+echo "======================================"
+echo "Setup Instructions:"
+echo "======================================"
+echo ""
+echo "1. Copy secret token di atas"
+echo ""
+echo "2. Tambahkan ke backend/.env:"
+echo "   TELEGRAM_WEBHOOK_SECRET_TOKEN=$SECRET"
+echo ""
+echo "3. Set webhook dengan secret:"
+echo "   curl -X POST \"https://api.telegram.org/bot<YOUR_BOT_TOKEN>/setWebhook\" \\"
+echo "     -H \"Content-Type: application/json\" \\"
+echo "     -d '{"
+echo "       \"url\": \"https://api.yourdomain.com/telegraf/webhook\","
+echo "       \"secret_token\": \"$SECRET\""
+echo "     }'"
+echo ""
+echo "======================================"
