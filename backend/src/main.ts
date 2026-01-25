@@ -5,6 +5,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { join } from 'path';
 
 async function bootstrap() {
+  // Force UTC timezone for consistent timestamp handling
+  process.env.TZ = 'UTC';
+  
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   
   app.enableCors({

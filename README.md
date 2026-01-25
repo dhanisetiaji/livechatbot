@@ -118,7 +118,12 @@ WEBHOOK_URL=https://yourdomain.com
 
 # Node Environment (development/production)
 NODE_ENV=development
+
+# Timezone (leave as UTC for consistent timestamp handling)
+TZ=UTC
 ```
+
+**Note:** The backend uses UTC internally and converts to local time in the frontend. This ensures consistent timestamps across different server timezones.
 
 ### 3. Database Setup
 
