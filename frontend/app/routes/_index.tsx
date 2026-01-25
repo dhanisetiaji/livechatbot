@@ -135,8 +135,30 @@ export default function Index() {
         setMessages((prev) => [...prev, newMessage]);
       }
 
-      // Refresh user list to update unread counts
-      revalidator.revalidate();
+      // Update user list and move chat to top
+      setUsers((prevUsers) => {
+        const updatedUsers = prevUsers.map((user) => {
+          if (user.id === newMessage.userId) {
+            return {
+              ...user,
+              lastMessage: {
+                content: newMessage.content || newMessage.message,
+                createdAt: newMessage.createdAt,
+                sender: 'user' as const,
+              },
+              updatedAt: newMessage.createdAt,
+            };
+          }
+          return user;
+        });
+
+        // Sort users by lastMessage.createdAt (newest first)
+        return updatedUsers.sort((a, b) => {
+          const dateA = a.lastMessage?.createdAt ? new Date(a.lastMessage.createdAt).getTime() : 0;
+          const dateB = b.lastMessage?.createdAt ? new Date(b.lastMessage.createdAt).getTime() : 0;
+          return dateB - dateA;
+        });
+      });
     });
 
     return () => {
@@ -269,10 +291,43 @@ export default function Index() {
         messageInput.trim() || '[Photo]',
         photoPath
       );
+      
+      // Add message to current chat
       setMessages((prev) => [...prev, newMessage]);
+      
+      // Update user list to move this chat to top and update lastMessage
+      setUsers((prevUsers) => {
+        const updatedUsers = prevUsers.map(user => {
+          if (user.id === selectedUser.id) {
+            return {
+              ...user,
+              lastMessage: {
+                content: newMessage.content,
+                createdAt: newMessage.createdAt,
+                sender: newMessage.sender
+              },
+              updatedAt: newMessage.createdAt
+            };
+          }
+          return user;
+        });
+        
+        // Sort by lastMessage createdAt (newest first)
+        return updatedUsers.sort((a, b) => {
+          const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+          const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+          return bTime - aTime;
+        });
+      });
+      
       setMessageInput("");
       setPhotoFile(null);
       setPhotoPreview(null);
+      
+      // Scroll to bottom after sending
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 100);
     } catch (error) {
       console.error("Failed to send message:", error);
       alert("Gagal mengirim pesan");
