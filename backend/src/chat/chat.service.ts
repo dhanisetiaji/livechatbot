@@ -24,8 +24,13 @@ export class ChatService {
     private eventsGateway: EventsGateway,
   ) {}
 
-  // Helper to convert Date to ISO string
+  // Helper to convert Date to ISO string (add 1 hour in production)
   private toISOString(date: Date): string {
+    if (process.env.NODE_ENV === 'production') {
+      // Add 1 hour for production server
+      const adjustedDate = new Date(date.getTime() + (1 * 60 * 60 * 1000));
+      return adjustedDate.toISOString();
+    }
     return date.toISOString();
   }
 
