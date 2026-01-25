@@ -24,14 +24,9 @@ export class ChatService {
     private eventsGateway: EventsGateway,
   ) {}
 
-  // Helper to convert UTC to WIB ISO string
-  private toWIB(date: Date): string {
-    const utcTime = date.getTime();
-    // Add 14 hours (7 hours x 2) because database seems to be storing in UTC-7
-    // Real time WIB = database time + 14 hours
-    const wibTime = new Date(utcTime + (14 * 60 * 60 * 1000));
-    const isoString = wibTime.toISOString();
-    return isoString;
+  // Helper to convert Date to ISO string
+  private toISOString(date: Date): string {
+    return date.toISOString();
   }
 
   // Helper to verify user has access to bot
@@ -97,7 +92,7 @@ export class ChatService {
   }
 
   private mapUsersWithMessages(users: User[]) {
-    return users.map(user => {
+    const mappedUsers = users.map(user => {
       const unreadCount = user.messages.filter(
         m => m.sender === MessageSender.USER && !m.isRead
       ).length;
@@ -117,11 +112,18 @@ export class ChatService {
         unreadCount,
         lastMessage: lastMessage ? {
           content: lastMessage.content,
-          createdAt: this.toWIB(lastMessage.createdAt),
+          createdAt: this.toISOString(lastMessage.createdAt),
           sender: lastMessage.sender,
         } : null,
-        updatedAt: this.toWIB(user.updatedAt),
+        updatedAt: this.toISOString(user.updatedAt),
       };
+    });
+
+    // Sort by lastMessage createdAt (newest first)
+    return mappedUsers.sort((a, b) => {
+      const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+      return bTime - aTime;
     });
   }
 
@@ -169,7 +171,7 @@ export class ChatService {
         content: m.content,
         sender: m.sender,
         isRead: m.isRead,
-        createdAt: this.toWIB(m.createdAt),
+        createdAt: this.toISOString(m.createdAt),
         photoUrl: m.photoUrl,
         user: {
           id: m.user.id,
@@ -208,13 +210,13 @@ export class ChatService {
       throw new Error('Failed to send message');
     }
 
-    // Return with WIB timestamp
+    // Return with ISO timestamp
     return {
       id: message.id,
       content: message.content,
       sender: message.sender,
       isRead: message.isRead,
-      createdAt: this.toWIB(message.createdAt),
+      createdAt: this.toISOString(message.createdAt),
       userId: message.userId,
       photoUrl: message.photoUrl,
     };

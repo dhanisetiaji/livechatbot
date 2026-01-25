@@ -104,7 +104,15 @@ export default function Index() {
           }
           return res.json();
         })
-        .then(setUsers)
+        .then(data => {
+          // Sort by lastMessage createdAt (newest first)
+          const sorted = data.sort((a: User, b: User) => {
+            const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+            const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+            return bTime - aTime;
+          });
+          setUsers(sorted);
+        })
         .catch(error => {
           console.error('Failed to load users:', error);
         });
@@ -351,15 +359,13 @@ export default function Index() {
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
 
     if (diffInHours < 24) {
-      const hours = date.getUTCHours();
-      const mins = date.getUTCMinutes();
-      console.log('formatTime - Input:', dateString, '-> UTC Hours:', hours, 'UTC Mins:', mins);
+      const hours = date.getHours();
+      const mins = date.getMinutes();
       return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
     }
     return date.toLocaleDateString("id-ID", { 
       day: "2-digit", 
-      month: "short",
-      timeZone: "UTC"
+      month: "short"
     });
   };
 
@@ -735,8 +741,8 @@ export default function Index() {
                     <div className="message-time">
                       {(() => {
                         const date = new Date(message.createdAt);
-                        const hours = date.getUTCHours();
-                        const mins = date.getUTCMinutes();
+                        const hours = date.getHours();
+                        const mins = date.getMinutes();
                         return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
                       })()}
                     </div>
