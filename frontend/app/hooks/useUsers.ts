@@ -37,6 +37,19 @@ export function useUsers(botId: string | null, enabled = true) {
     [queryClient, botId],
   );
 
+  // Increment unread count for a specific user (e.g. new WS message while chat closed)
+  const incrementUnread = useCallback(
+    (userId: string) => {
+      queryClient.setQueryData<User[]>([USERS_QUERY_KEY, botId], (old) => {
+        if (!old) return old;
+        return old.map((u) =>
+          u.id === userId ? { ...u, unreadCount: u.unreadCount + 1 } : u,
+        );
+      });
+    },
+    [queryClient, botId],
+  );
+
   // Push a new incoming message into the user-list sidebar
   const handleIncomingMessage = useCallback(
     (msg: Message) => {
@@ -61,6 +74,7 @@ export function useUsers(botId: string | null, enabled = true) {
     isError: query.isError,
     refetch: query.refetch,
     updateUser,
+    incrementUnread,
     handleIncomingMessage,
   };
 }

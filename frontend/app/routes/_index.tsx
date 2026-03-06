@@ -8,6 +8,7 @@ import { useSocket } from '~/hooks/useSocket';
 import { useMobile } from '~/hooks/useMobile';
 import { Sidebar } from '~/components/Sidebar';
 import { ChatArea } from '~/components/ChatArea';
+import { markUserAsRead } from '~/services/api';
 import type { User, Message } from '~/types';
 
 export const meta: MetaFunction = () => [
@@ -29,6 +30,7 @@ export default function Index() {
     users,
     isLoading: usersLoading,
     updateUser,
+    incrementUnread,
     handleIncomingMessage,
     refetch: refetchUsers,
   } = useUsers(auth.selectedBot, auth.isReady);
@@ -51,16 +53,24 @@ export default function Index() {
     enabled: auth.isReady,
     onNewMessage: useCallback(
       (msg: Message) => {
-        // Update sidebar
+        // Update sidebar (lastMessage + sort)
         handleIncomingMessage(msg);
 
-        // If this chat is open, append
         const msgUserId = msg.userId || msg.user?.id;
+
         if (selectedUser && msgUserId === selectedUser.id) {
+          // Chat is open — append message
           appendMessage(msg);
+          // Mark as read so the backend doesn't keep unread count stale
+          if (msg.sender === 'user' && msgUserId) {
+            markUserAsRead(msgUserId).catch(() => {});
+          }
+        } else if (msgUserId && msg.sender === 'user') {
+          // Chat is NOT open — bump the unread badge
+          incrementUnread(msgUserId);
         }
       },
-      [handleIncomingMessage, appendMessage, selectedUser],
+      [handleIncomingMessage, appendMessage, selectedUser, incrementUnread],
     ),
   });
 
@@ -72,8 +82,12 @@ export default function Index() {
       }
       setSelectedUser(user);
       setIsMobileChatOpen(true);
+      // Immediately clear unread badge in the sidebar
+      if (user.unreadCount > 0) {
+        updateUser(user.id, { unreadCount: 0 });
+      }
     },
-    [selectedUser, resetMessages],
+    [selectedUser, resetMessages, updateUser],
   );
 
   const handleBack = useCallback(() => {
