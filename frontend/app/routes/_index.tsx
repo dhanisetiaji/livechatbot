@@ -6,6 +6,7 @@ import { useUsers } from '~/hooks/useUsers';
 import { useMessages } from '~/hooks/useMessages';
 import { useSocket } from '~/hooks/useSocket';
 import { useMobile } from '~/hooks/useMobile';
+import { useNotification } from '~/hooks/useNotification';
 import { Sidebar } from '~/components/Sidebar';
 import { ChatArea } from '~/components/ChatArea';
 import { markUserAsRead } from '~/services/api';
@@ -21,6 +22,7 @@ export default function Index() {
   const isMobile = useMobile();
   const auth = useAuth();
 
+  const { notify } = useNotification();
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState('');
@@ -69,8 +71,20 @@ export default function Index() {
           // Chat is NOT open — bump the unread badge
           incrementUnread(msgUserId);
         }
+
+        // ── Browser notification (when tab is hidden) ───────
+        if (msg.sender === 'user') {
+          const senderName = msg.user
+            ? `${msg.user.firstName} ${msg.user.lastName || ''}`.trim()
+            : 'Pengguna';
+          notify({
+            title: `Pesan baru dari ${senderName}`,
+            body: msg.content.length > 120 ? msg.content.slice(0, 120) + '…' : msg.content,
+            tag: `chat-${msgUserId}`,
+          });
+        }
       },
-      [handleIncomingMessage, appendMessage, selectedUser, incrementUnread],
+      [handleIncomingMessage, appendMessage, selectedUser, incrementUnread, notify],
     ),
   });
 

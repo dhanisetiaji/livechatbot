@@ -7,7 +7,7 @@ import {
 } from "@remix-run/react";
 import type { LinksFunction } from "@remix-run/node";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import globalStyles from "~/styles/global.css?url";
 
 export const links: LinksFunction = () => [
@@ -46,6 +46,19 @@ export default function App() {
         },
       })
   );
+
+  // Register Service Worker for background notifications
+  useEffect(() => {
+    if (
+      typeof window !== 'undefined' &&
+      'serviceWorker' in navigator &&
+      window.location.protocol !== 'file:'
+    ) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // SW registration failed — notifications will still work via fallback
+      });
+    }
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
