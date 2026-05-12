@@ -35,6 +35,44 @@ export function formatMessageTime(dateString: string): string {
   });
 }
 
+/** Decide whether a date separator should appear above the message. */
+export function shouldShowDateSeparator(
+  prev: string | undefined,
+  current: string,
+): boolean {
+  if (!prev) return true;
+  const a = new Date(prev);
+  const b = new Date(current);
+  return (
+    a.getFullYear() !== b.getFullYear() ||
+    a.getMonth() !== b.getMonth() ||
+    a.getDate() !== b.getDate()
+  );
+}
+
+/** Human-friendly date separator (e.g. "Hari ini", "Kemarin", "12 Mei 2026"). */
+export function formatDateSeparator(dateString: string): string {
+  const d = new Date(dateString);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  const same = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  if (same(d, today)) return 'Hari ini';
+  if (same(d, yesterday)) return 'Kemarin';
+
+  return d.toLocaleDateString('id-ID', {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 export function getInitials(firstName?: string, lastName?: string): string {
   const f = firstName?.charAt(0) || '';
   const l = lastName?.charAt(0) || '';

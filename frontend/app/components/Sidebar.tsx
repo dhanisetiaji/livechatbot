@@ -18,6 +18,7 @@ interface SidebarProps {
   onLogout: () => void;
   currentBotName: string;
   isMobileChatOpen: boolean;
+  isConnected?: boolean;
 }
 
 export const Sidebar = React.memo(function Sidebar({
@@ -36,6 +37,7 @@ export const Sidebar = React.memo(function Sidebar({
   onLogout,
   currentBotName,
   isMobileChatOpen,
+  isConnected = true,
 }: SidebarProps) {
   const filteredUsers = React.useMemo(() => {
     if (!searchQuery.trim()) return users;
@@ -54,6 +56,10 @@ export const Sidebar = React.memo(function Sidebar({
         <div className="sidebar-header-top">
           <h1>💬 Live Chat</h1>
           <div className="sidebar-header-actions">
+            <span
+              className={`conn-badge ${isConnected ? 'online' : 'offline'}`}
+              title={isConnected ? 'Terhubung' : 'Tidak terhubung'}
+            />
             {currentUser?.role === 'super_admin' && (
               <button className="btn-header btn-admin" onClick={onAdminPanel} title="Admin Panel">
                 ⚙️

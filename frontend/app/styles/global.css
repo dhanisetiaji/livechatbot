@@ -1003,3 +1003,247 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* ---------------------------------------------------------------
+   ENHANCEMENTS — date separators, scroll pill, skeletons,
+   status indicators, lightbox, connection badge, message states.
+   Added in the UX/UI refactor. (Append-only.)
+   --------------------------------------------------------------- */
+
+/* Wrapper for floating UI inside the messages list */
+.messages-wrap {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.messages-wrap > .messages-container {
+  flex: 1;
+}
+
+/* -- Date separator ----------------------------------- */
+.date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 8px;
+  position: sticky;
+  top: 4px;
+  z-index: 2;
+  pointer-events: none;
+}
+.date-separator > span {
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--text-light);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  letter-spacing: 0.2px;
+}
+
+/* -- Scroll-to-bottom pill ---------------------------- */
+.scroll-bottom-pill {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: white;
+  border: 1px solid var(--border);
+  color: var(--text-dark);
+  font-size: 20px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  transition: transform var(--transition-fast), background var(--transition-fast);
+  animation: pillIn 0.2s ease;
+}
+.scroll-bottom-pill:hover {
+  transform: translateY(-2px);
+  background: #f6f6f6;
+}
+.scroll-bottom-pill.has-unread {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+.scroll-bottom-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ef4444;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 10px;
+  min-width: 18px;
+  text-align: center;
+  border: 2px solid white;
+  line-height: 1.1;
+}
+@keyframes pillIn {
+  from { opacity: 0; transform: translateY(8px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* -- Skeleton bubbles (loading state) ----------------- */
+.messages-skeleton {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.skeleton-bubble {
+  height: 38px;
+  border-radius: 14px;
+  background: linear-gradient(90deg, #e9eef0 25%, #f4f7f8 50%, #e9eef0 75%);
+  background-size: 200% 100%;
+  animation: skeletonShimmer 1.4s ease-in-out infinite;
+  max-width: 280px;
+}
+.skeleton-bubble.left  { align-self: flex-start; width: 60%; }
+.skeleton-bubble.right { align-self: flex-end;   width: 45%; background: linear-gradient(90deg, #cdebd9 25%, #def7e6 50%, #cdebd9 75%); background-size: 200% 100%; }
+@keyframes skeletonShimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* -- Message status / optimistic UI ------------------- */
+.message.is-pending .message-bubble { opacity: 0.7; }
+.message.is-failed  .message-bubble {
+  border: 1px solid #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.08);
+}
+.msg-status {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1;
+}
+.msg-status.pending { color: var(--text-muted); }
+.msg-status.sent    { color: #4caf50; }
+.msg-status.failed  {
+  background: #ef4444;
+  color: white;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  text-align: center;
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.msg-failed-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(239, 68, 68, 0.35);
+}
+.msg-failed-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+.msg-failed-btn.retry   { background: var(--primary); color: white; }
+.msg-failed-btn.retry:hover { background: var(--primary-dark); }
+.msg-failed-btn.discard { background: transparent; color: #ef4444; }
+.msg-failed-btn.discard:hover { background: rgba(239,68,68,0.08); }
+
+/* -- Image with lightbox cursor ----------------------- */
+.message-photo {
+  cursor: zoom-in;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform var(--transition-fast);
+}
+.message-photo:hover { transform: scale(1.01); }
+
+/* -- Lightbox ----------------------------------------- */
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.88);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  animation: fadeIn 0.15s ease;
+}
+.lightbox-img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 12px 48px rgba(0,0,0,0.6);
+  cursor: default;
+}
+.lightbox-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.12);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--transition-fast);
+}
+.lightbox-close:hover { background: rgba(255,255,255,0.24); }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* -- Connection badge in sidebar ----------------------- */
+.conn-badge {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 4px;
+  align-self: center;
+}
+.conn-badge.online  { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.18); }
+.conn-badge.offline { background: #ef4444; box-shadow: 0 0 0 3px rgba(239,68,68,0.18); animation: connBlink 1.4s ease-in-out infinite; }
+@keyframes connBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+.conn-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  margin-left: 6px;
+  vertical-align: middle;
+  animation: connBlink 1.4s ease-in-out infinite;
+}
+
+/* Make textarea behave nicely inside the form */
+textarea.message-input {
+  line-height: 1.4;
+  padding-top: 11px;
+  padding-bottom: 11px;
+  overflow-y: auto;
+}

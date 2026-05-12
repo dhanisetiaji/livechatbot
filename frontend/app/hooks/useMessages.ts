@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   fetchMessages,
   sendMessage as apiSendMessage,
@@ -11,77 +11,101 @@ import type { Message, MessagesResponse } from '~/types';
 export const MESSAGES_QUERY_KEY = 'chat-messages';
 const PAGE_SIZE = 20;
 
+function genClientId() {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function useMessages(userId: string | null, enabled = true) {
   const queryClient = useQueryClient();
-  const [allMessages, setAllMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState(0);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const markingAsRead = useRef(false);
   const markedUsers = useRef<Set<string>>(new Set());
 
-  // Initial load (latest 20 messages)
+  // Initial load (latest PAGE_SIZE)
   const query = useQuery({
     queryKey: [MESSAGES_QUERY_KEY, userId],
-    queryFn: async () => {
-      const res = await fetchMessages(userId!, PAGE_SIZE, 0);
-      return res;
-    },
+    queryFn: () => fetchMessages(userId!, PAGE_SIZE, 0),
     enabled: enabled && !!userId,
-    staleTime: 0, // Always refetch on user switch
+    staleTime: 0,
     gcTime: 1000 * 60 * 2,
   });
 
-  // Sync query result into local state (only on first load / user switch)
-  const prevUserId = useRef<string | null>(null);
-  if (query.data && userId !== prevUserId.current) {
-    prevUserId.current = userId;
-    setAllMessages(query.data.messages);
+  // Sync the query data into local state when the user (or fetched page) changes.
+  useEffect(() => {
+    if (!userId) {
+      setMessages([]);
+      setHasMore(false);
+      setTotal(0);
+      return;
+    }
+    if (!query.data) return;
+
+    setMessages(query.data.messages);
     setHasMore(query.data.hasMore);
     setTotal(query.data.total);
 
-    // Auto-mark as read
-    if (userId && !markingAsRead.current && !markedUsers.current.has(userId)) {
+    if (!markedUsers.current.has(userId)) {
       const hasUnread = query.data.messages.some(
         (m) => m.sender === 'user' && !m.isRead,
       );
       if (hasUnread) {
-        markingAsRead.current = true;
         markedUsers.current.add(userId);
-        markUserAsRead(userId)
-          .catch(() => markedUsers.current.delete(userId!))
-          .finally(() => {
-            markingAsRead.current = false;
-          });
+        markUserAsRead(userId).catch(() => markedUsers.current.delete(userId));
       }
     }
-  }
+  }, [userId, query.data]);
 
-  // Load older messages (infinite scroll upward)
+  // Load older messages (upward infinite scroll)
   const loadMore = useCallback(async () => {
     if (!userId || isLoadingMore || !hasMore) return;
     setIsLoadingMore(true);
     try {
-      const res = await fetchMessages(userId, PAGE_SIZE, allMessages.length);
-      setAllMessages((prev) => [...res.messages, ...prev]);
+      const res: MessagesResponse = await fetchMessages(
+        userId,
+        PAGE_SIZE,
+        messages.filter((m) => m.status !== 'pending').length,
+      );
+      setMessages((prev) => {
+        const known = new Set(prev.map((m) => m.id));
+        const olderUnique = res.messages.filter((m) => !known.has(m.id));
+        return [...olderUnique, ...prev];
+      });
       setHasMore(res.hasMore);
       setTotal(res.total);
     } finally {
       setIsLoadingMore(false);
     }
-  }, [userId, isLoadingMore, hasMore, allMessages.length]);
+  }, [userId, isLoadingMore, hasMore, messages]);
 
-  // Append a new message (from WS or after send)
+  // Append message from socket. Dedup by id + reconcile pending by clientMessageId.
   const appendMessage = useCallback((msg: Message) => {
-    setAllMessages((prev) => {
-      // Deduplicate
+    setMessages((prev) => {
+      if (msg.clientMessageId) {
+        const idx = prev.findIndex((m) => m.clientMessageId === msg.clientMessageId);
+        if (idx >= 0) {
+          const next = prev.slice();
+          next[idx] = { ...msg, status: 'sent' };
+          return next;
+        }
+      }
       if (prev.some((m) => m.id === msg.id)) return prev;
       return [...prev, msg];
     });
     setTotal((t) => t + 1);
   }, []);
 
-  // Send message mutation
+  // Mark all messages for the current user as read (in local state).
+  const markAllRead = useCallback(() => {
+    setMessages((prev) =>
+      prev.some((m) => !m.isRead)
+        ? prev.map((m) => (m.isRead ? m : { ...m, isRead: true }))
+        : prev,
+    );
+  }, []);
+
+  // Send message with optimistic UI.
   const sendMutation = useMutation({
     mutationFn: async ({
       content,
@@ -92,37 +116,113 @@ export function useMessages(userId: string | null, enabled = true) {
     }) => {
       if (!userId) throw new Error('No user selected');
 
+      const clientMessageId = genClientId();
       let photoUrl: string | undefined;
+      let photoPreview: string | undefined;
+
       if (photoFile) {
-        const uploadRes = await uploadPhoto(photoFile);
-        photoUrl = uploadRes.url;
+        photoPreview = URL.createObjectURL(photoFile);
       }
 
-      return apiSendMessage(userId, content || '[Photo]', photoUrl);
-    },
-    onSuccess: (msg) => {
-      appendMessage(msg);
+      // Optimistic insert
+      const optimistic: Message = {
+        id: clientMessageId,
+        clientMessageId,
+        content: content || (photoFile ? '[Photo]' : ''),
+        sender: 'admin',
+        isRead: true,
+        createdAt: new Date().toISOString(),
+        photoUrl: photoPreview ?? null,
+        userId: userId,
+        status: 'pending',
+      };
+      setMessages((prev) => [...prev, optimistic]);
+      setTotal((t) => t + 1);
+
+      try {
+        if (photoFile) {
+          const uploadRes = await uploadPhoto(photoFile);
+          photoUrl = uploadRes.url;
+        }
+        const saved = await apiSendMessage(
+          userId,
+          content || '[Photo]',
+          photoUrl,
+          clientMessageId,
+        );
+
+        // Reconcile optimistic with server result
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.clientMessageId === clientMessageId
+              ? { ...saved, clientMessageId, status: 'sent' }
+              : m,
+          ),
+        );
+
+        if (photoPreview) URL.revokeObjectURL(photoPreview);
+        return saved;
+      } catch (err) {
+        // Mark as failed instead of removing — let user retry
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.clientMessageId === clientMessageId ? { ...m, status: 'failed' } : m,
+          ),
+        );
+        throw err;
+      }
     },
   });
 
-  // Reset when switching users
-  const reset = useCallback(() => {
-    setAllMessages([]);
-    setHasMore(false);
-    setTotal(0);
-    prevUserId.current = null;
+  // Retry a failed message
+  const retryMessage = useCallback(
+    async (clientMessageId: string) => {
+      const failed = messages.find((m) => m.clientMessageId === clientMessageId);
+      if (!failed || !userId) return;
+      setMessages((prev) =>
+        prev.filter((m) => m.clientMessageId !== clientMessageId),
+      );
+      try {
+        await sendMutation.mutateAsync({ content: failed.content, photoFile: null });
+      } catch {
+        /* mutation handles state */
+      }
+    },
+    [messages, userId, sendMutation],
+  );
+
+  // Discard a failed optimistic message
+  const discardMessage = useCallback((clientMessageId: string) => {
+    setMessages((prev) => prev.filter((m) => m.clientMessageId !== clientMessageId));
+    setTotal((t) => Math.max(0, t - 1));
   }, []);
 
+  const reset = useCallback(() => {
+    setMessages([]);
+    setHasMore(false);
+    setTotal(0);
+  }, []);
+
+  // Clean up "marked read" memory when the user changes – allow re-mark on revisit
+  useEffect(() => {
+    return () => {
+      if (userId) markedUsers.current.delete(userId);
+    };
+  }, [userId]);
+
   return {
-    messages: allMessages,
+    messages,
     isLoading: query.isLoading,
     isLoadingMore,
     hasMore,
     total,
     loadMore,
     appendMessage,
+    markAllRead,
     sendMessage: sendMutation.mutateAsync,
     isSending: sendMutation.isPending,
+    retryMessage,
+    discardMessage,
     reset,
   };
 }

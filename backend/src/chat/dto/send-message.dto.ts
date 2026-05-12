@@ -8,4 +8,9 @@ export class SendMessageDto {
   @IsOptional()
   @IsString()
   photoUrl?: string;
+
+  /** Temporary id generated on the client for optimistic-UI reconciliation. */
+  @IsOptional()
+  @IsString()
+  clientMessageId?: string;
 }

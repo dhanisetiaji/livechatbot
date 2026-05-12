@@ -1,6 +1,6 @@
 import type { MetaFunction } from '@remix-run/node';
 import { useNavigate } from '@remix-run/react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '~/hooks/useAuth';
 import { useUsers } from '~/hooks/useUsers';
 import { useMessages } from '~/hooks/useMessages';
@@ -21,20 +21,19 @@ export default function Index() {
   const navigate = useNavigate();
   const isMobile = useMobile();
   const auth = useAuth();
-
   const { notify } = useNotification();
+
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [isMobileChatOpen, setIsMobileChatOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState('');
 
-  // ── Data hooks ──────────────────────────────────────────
   const {
     users,
     isLoading: usersLoading,
     updateUser,
     incrementUnread,
+    clearUnread,
     handleIncomingMessage,
-    refetch: refetchUsers,
   } = useUsers(auth.selectedBot, auth.isReady);
 
   const {
@@ -45,46 +44,55 @@ export default function Index() {
     total,
     loadMore,
     appendMessage,
+    markAllRead,
     sendMessage,
     isSending,
+    retryMessage,
+    discardMessage,
     reset: resetMessages,
   } = useMessages(selectedUser?.id ?? null, auth.isReady);
 
   // ── Socket ──────────────────────────────────────────────
-  useSocket({
+  const { isConnected } = useSocket({
     enabled: auth.isReady,
+    botId: auth.selectedBot,
     onNewMessage: useCallback(
       (msg: Message) => {
-        // Update sidebar (lastMessage + sort)
         handleIncomingMessage(msg);
 
         const msgUserId = msg.userId || msg.user?.id;
 
         if (selectedUser && msgUserId === selectedUser.id) {
-          // Chat is open — append message
           appendMessage(msg);
-          // Mark as read so the backend doesn't keep unread count stale
           if (msg.sender === 'user' && msgUserId) {
             markUserAsRead(msgUserId).catch(() => {});
           }
         } else if (msgUserId && msg.sender === 'user') {
-          // Chat is NOT open — bump the unread badge
           incrementUnread(msgUserId);
         }
 
-        // ── Browser notification (when tab is hidden) ───────
-        if (msg.sender === 'user') {
+        if (msg.sender === 'user' && document.visibilityState !== 'visible') {
           const senderName = msg.user
             ? `${msg.user.firstName} ${msg.user.lastName || ''}`.trim()
             : 'Pengguna';
           notify({
             title: `Pesan baru dari ${senderName}`,
-            body: msg.content.length > 120 ? msg.content.slice(0, 120) + '…' : msg.content,
+            body:
+              msg.content.length > 120
+                ? msg.content.slice(0, 120) + '…'
+                : msg.content,
             tag: `chat-${msgUserId}`,
           });
         }
       },
       [handleIncomingMessage, appendMessage, selectedUser, incrementUnread, notify],
+    ),
+    onUserRead: useCallback(
+      ({ userId }: { userId: string }) => {
+        clearUnread(userId);
+        if (selectedUser?.id === userId) markAllRead();
+      },
+      [clearUnread, selectedUser, markAllRead],
     ),
   });
 
@@ -96,12 +104,11 @@ export default function Index() {
       }
       setSelectedUser(user);
       setIsMobileChatOpen(true);
-      // Immediately clear unread badge in the sidebar
       if (user.unreadCount > 0) {
-        updateUser(user.id, { unreadCount: 0 });
+        clearUnread(user.id);
       }
     },
-    [selectedUser, resetMessages, updateUser],
+    [selectedUser, resetMessages, clearUnread],
   );
 
   const handleBack = useCallback(() => {
@@ -122,8 +129,6 @@ export default function Index() {
   const handleSendMessage = useCallback(
     async (content: string, photoFile?: File | null) => {
       const msg = await sendMessage({ content, photoFile });
-
-      // Update sidebar for the sent message
       if (selectedUser) {
         updateUser(selectedUser.id, {
           lastMessage: {
@@ -138,9 +143,13 @@ export default function Index() {
     [sendMessage, selectedUser, updateUser],
   );
 
+  // Reflect total unread count in the page title (so background tabs see it)
   const totalUnread = users.reduce((sum, u) => sum + u.unreadCount, 0);
+  useEffect(() => {
+    const base = 'Telegram Live Chat - Admin Dashboard';
+    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base;
+  }, [totalUnread]);
 
-  // ── Auth loading state ──────────────────────────────────
   if (!auth.isReady) {
     return (
       <div className="app-loading">
@@ -168,6 +177,7 @@ export default function Index() {
         onLogout={auth.logout}
         currentBotName={auth.getCurrentBotName()}
         isMobileChatOpen={isMobileChatOpen}
+        isConnected={isConnected}
       />
 
       <ChatArea
@@ -182,6 +192,9 @@ export default function Index() {
         isSending={isSending}
         onBack={handleBack}
         isMobile={isMobile}
+        onRetryMessage={retryMessage}
+        onDiscardMessage={discardMessage}
+        isConnected={isConnected}
       />
     </div>
   );

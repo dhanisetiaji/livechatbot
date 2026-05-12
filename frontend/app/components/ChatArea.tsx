@@ -1,10 +1,9 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import type { User, Message } from '~/types';
 import { getInitials } from '~/utils/chat';
 import { MessageList } from './MessageList';
 import { SearchBar } from './SearchBar';
 import { useChatSearch } from '~/hooks/useChatSearch';
-import type { SearchMatch } from '~/types';
 
 interface ChatAreaProps {
   selectedUser: User | null;
@@ -18,6 +17,9 @@ interface ChatAreaProps {
   isSending: boolean;
   onBack: () => void;
   isMobile: boolean;
+  onRetryMessage?: (clientMessageId: string) => void;
+  onDiscardMessage?: (clientMessageId: string) => void;
+  isConnected?: boolean;
 }
 
 export const ChatArea = React.memo(function ChatArea({
@@ -32,52 +34,80 @@ export const ChatArea = React.memo(function ChatArea({
   isSending,
   onBack,
   isMobile,
+  onRetryMessage,
+  onDiscardMessage,
+  isConnected = true,
 }: ChatAreaProps) {
   const [messageInput, setMessageInput] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const search = useChatSearch({ messages });
 
+  // Auto-grow textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 140) + 'px';
+  }, [messageInput]);
+
+  // Reset draft on user switch
+  useEffect(() => {
+    setMessageInput('');
+    setPhotoFile(null);
+    setPhotoPreview(null);
+  }, [selectedUser?.id]);
+
   const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      if ((!messageInput.trim() && !photoFile) || isSending) return;
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const text = messageInput.trim();
+      if ((!text && !photoFile) || isSending) return;
+
+      // Reset input immediately (optimistic UI in hook handles echo)
+      const sentText = text;
+      const sentFile = photoFile;
+      setMessageInput('');
+      setPhotoFile(null);
+      setPhotoPreview(null);
 
       try {
-        await onSendMessage(messageInput.trim(), photoFile);
-        setMessageInput('');
-        setPhotoFile(null);
-        setPhotoPreview(null);
+        await onSendMessage(sentText, sentFile);
       } catch {
-        alert('Gagal mengirim pesan');
+        // useMessages already marks the optimistic bubble as failed;
+        // restore the draft so the user can edit + retry
+        setMessageInput(sentText);
       }
     },
     [messageInput, photoFile, isSending, onSendMessage],
   );
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const handleFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('Hanya file gambar yang diperbolehkan');
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Ukuran file maksimal 5MB');
-      return;
-    }
+      if (!file.type.startsWith('image/')) {
+        alert('Hanya file gambar yang diperbolehkan');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Ukuran file maksimal 5MB');
+        return;
+      }
 
-    setPhotoFile(file);
-    const reader = new FileReader();
-    reader.onloadend = () => setPhotoPreview(reader.result as string);
-    reader.readAsDataURL(file);
-
-    // Reset input so same file can be selected again
-    e.target.value = '';
-  }, []);
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setPhotoPreview(reader.result as string);
+      reader.readAsDataURL(file);
+      e.target.value = '';
+    },
+    [],
+  );
 
   const clearPhoto = useCallback(() => {
     setPhotoFile(null);
@@ -86,7 +116,6 @@ export const ChatArea = React.memo(function ChatArea({
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
-      // Ctrl+F / Cmd+F to open search
       if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
         e.preventDefault();
         search.openSearch();
@@ -95,7 +124,27 @@ export const ChatArea = React.memo(function ChatArea({
     [search],
   );
 
-  // Empty state
+  const handleTextareaKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // Enter = send, Shift+Enter = newline (standard chat convention)
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+      }
+    },
+    [handleSubmit],
+  );
+
+  // Close lightbox on Esc
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxUrl(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [lightboxUrl]);
+
   if (!selectedUser) {
     return (
       <div className="chat-area" onKeyDown={handleKeyDown} tabIndex={-1}>
@@ -110,9 +159,9 @@ export const ChatArea = React.memo(function ChatArea({
 
   return (
     <div className="chat-area" onKeyDown={handleKeyDown} tabIndex={-1}>
-      {/* ── Header ── */}
+      {/* Header */}
       <div className="chat-header">
-        <button className="back-button" onClick={onBack}>
+        <button className="back-button" onClick={onBack} aria-label="Kembali">
           ←
         </button>
         <div className="chat-header-avatar">
@@ -121,22 +170,30 @@ export const ChatArea = React.memo(function ChatArea({
         <div className="chat-header-info">
           <div className="chat-user-name">
             {selectedUser.firstName} {selectedUser.lastName || ''}
+            {!isConnected && (
+              <span className="conn-dot" title="Tidak terhubung ke server" />
+            )}
           </div>
           <div className="chat-user-info">
             @{selectedUser.username || 'N/A'} • ID: {selectedUser.telegramId}
-            {total > 0 && <span> • {messages.length}/{total} pesan</span>}
+            {total > 0 && (
+              <span>
+                {' '}
+                • {messages.length}/{total} pesan
+              </span>
+            )}
           </div>
         </div>
         <button
           className="btn-header-search"
           onClick={search.isSearchOpen ? search.closeSearch : search.openSearch}
           title="Cari pesan (Ctrl+F)"
+          aria-label="Cari pesan"
         >
           🔍
         </button>
       </div>
 
-      {/* ── Search bar ── */}
       {search.isSearchOpen && (
         <SearchBar
           searchTerm={search.searchTerm}
@@ -149,38 +206,37 @@ export const ChatArea = React.memo(function ChatArea({
         />
       )}
 
-      {/* ── Messages ── */}
       <MessageList
         messages={messages}
         isLoading={isLoading}
         isLoadingMore={isLoadingMore}
         hasMore={hasMore}
         onLoadMore={onLoadMore}
+        onImageClick={setLightboxUrl}
+        onRetry={onRetryMessage}
+        onDiscard={onDiscardMessage}
         searchTerm={search.isSearchOpen ? search.searchTerm : undefined}
         currentMatch={search.isSearchOpen ? search.currentMatch : null}
       />
 
-      {/* ── Input area ── */}
+      {/* Input */}
       <div className="message-input-container">
         {photoPreview && (
           <div className="photo-preview-container">
             <div className="photo-preview-wrapper">
               <img src={photoPreview} alt="Preview" className="photo-preview-img" />
-              <button type="button" onClick={clearPhoto} className="photo-preview-remove">
+              <button
+                type="button"
+                onClick={clearPhoto}
+                className="photo-preview-remove"
+                aria-label="Hapus gambar"
+              >
                 ✕
               </button>
             </div>
           </div>
         )}
         <form onSubmit={handleSubmit} className="message-input-form">
-          <input
-            type="text"
-            className="message-input"
-            placeholder="Ketik pesan..."
-            value={messageInput}
-            onChange={(e) => setMessageInput(e.target.value)}
-            disabled={isSending}
-          />
           <label className="upload-button" title="Kirim gambar">
             📎
             <input
@@ -192,19 +248,50 @@ export const ChatArea = React.memo(function ChatArea({
               style={{ display: 'none' }}
             />
           </label>
+          <textarea
+            ref={textareaRef}
+            className="message-input"
+            placeholder="Ketik pesan… (Enter untuk kirim, Shift+Enter baris baru)"
+            value={messageInput}
+            onChange={(e) => setMessageInput(e.target.value)}
+            onKeyDown={handleTextareaKeyDown}
+            disabled={isSending}
+            rows={1}
+          />
           <button
             type="submit"
             className="send-button"
             disabled={(!messageInput.trim() && !photoFile) || isSending}
+            aria-label="Kirim"
           >
-            {isSending ? (
-              <span className="loading-spinner small white" />
-            ) : (
-              '➤'
-            )}
+            {isSending ? <span className="loading-spinner small white" /> : '➤'}
           </button>
         </form>
       </div>
+
+      {/* Image lightbox */}
+      {lightboxUrl && (
+        <div
+          className="lightbox-overlay"
+          onClick={() => setLightboxUrl(null)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <button
+            className="lightbox-close"
+            onClick={() => setLightboxUrl(null)}
+            aria-label="Tutup"
+          >
+            ✕
+          </button>
+          <img
+            src={lightboxUrl}
+            alt="Preview"
+            className="lightbox-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 });

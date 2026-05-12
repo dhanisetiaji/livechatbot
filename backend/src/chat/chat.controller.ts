@@ -37,7 +37,14 @@ export class ChatController {
     @Param('userId') userId: string,
     @Body() dto: SendMessageDto,
   ) {
-    return this.chatService.sendMessage(req.user.userId, req.user.role, userId, dto.content, dto.photoUrl);
+    return this.chatService.sendMessage(
+      req.user.userId,
+      req.user.role,
+      userId,
+      dto.content,
+      dto.photoUrl,
+      dto.clientMessageId,
+    );
   }
 
   @Get('stats')

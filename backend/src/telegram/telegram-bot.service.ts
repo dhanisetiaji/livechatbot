@@ -104,12 +104,16 @@ export class TelegramBotService {
     // For now, just log
     this.logger.log(`Message received from user ${user.telegramId}: ${text}`);
 
-    // Notify dashboard via WebSocket
-    this.eventsGateway.notifyNewMessage({
+    // Touch user.updatedAt so the contact list re-orders correctly
+    await this.userRepository.update(user.id, { updatedAt: new Date() });
+
+    // Notify dashboard via WebSocket (UTC ISO – frontend converts to local time)
+    this.eventsGateway.notifyNewMessage(botId, {
       id: message.id,
       content: message.content,
       sender: message.sender,
-      createdAt: this.toWIB(message.createdAt),
+      isRead: message.isRead,
+      createdAt: message.createdAt.toISOString(),
       userId: user.id,
       photoUrl: photoUrl,
       botId: botId,
@@ -163,6 +167,30 @@ export class TelegramBotService {
         });
 
         const savedMessage = await this.messageRepository.save(message);
+
+        // Bump user.updatedAt so the contact list re-orders
+        await this.userRepository.update(user.id, { updatedAt: new Date() });
+
+        // Broadcast to all dashboard clients of this bot so multiple admin
+        // tabs stay in sync after an outgoing reply
+        this.eventsGateway.notifyNewMessage(botId, {
+          id: savedMessage.id,
+          content: savedMessage.content,
+          sender: savedMessage.sender,
+          isRead: savedMessage.isRead,
+          createdAt: savedMessage.createdAt.toISOString(),
+          userId: user.id,
+          photoUrl: savedMessage.photoUrl,
+          botId: botId,
+          user: {
+            id: user.id,
+            telegramId: user.telegramId,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            username: user.username,
+          },
+        });
+
         return savedMessage;
       }
     }
@@ -241,11 +269,5 @@ export class TelegramBotService {
         reject(err);
       });
     });
-  }
-
-  private toWIB(date: Date): string {
-    const utcTime = date.getTime();
-    const wibTime = new Date(utcTime + (14 * 60 * 60 * 1000));
-    return wibTime.toISOString();
   }
 }

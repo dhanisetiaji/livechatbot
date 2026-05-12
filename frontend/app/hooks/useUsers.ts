@@ -12,7 +12,10 @@ export function useUsers(botId: string | null, enabled = true) {
     queryKey: [USERS_QUERY_KEY, botId],
     queryFn: () => fetchUsers(botId || undefined),
     enabled: enabled && !!botId,
-    refetchInterval: 30_000, // soft poll every 30s as fallback
+    // Reduced fallback poll – primary updates come via WebSocket
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    staleTime: 10_000,
     select: (data) =>
       [...data].sort((a, b) => {
         const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
@@ -21,7 +24,6 @@ export function useUsers(botId: string | null, enabled = true) {
       }),
   });
 
-  // Optimistically update a user in the cache (e.g. new WS message)
   const updateUser = useCallback(
     (userId: string, patch: Partial<User>) => {
       queryClient.setQueryData<User[]>([USERS_QUERY_KEY, botId], (old) => {
@@ -37,7 +39,6 @@ export function useUsers(botId: string | null, enabled = true) {
     [queryClient, botId],
   );
 
-  // Increment unread count for a specific user (e.g. new WS message while chat closed)
   const incrementUnread = useCallback(
     (userId: string) => {
       queryClient.setQueryData<User[]>([USERS_QUERY_KEY, botId], (old) => {
@@ -50,7 +51,18 @@ export function useUsers(botId: string | null, enabled = true) {
     [queryClient, botId],
   );
 
-  // Push a new incoming message into the user-list sidebar
+  const clearUnread = useCallback(
+    (userId: string) => {
+      queryClient.setQueryData<User[]>([USERS_QUERY_KEY, botId], (old) => {
+        if (!old) return old;
+        return old.map((u) =>
+          u.id === userId ? { ...u, unreadCount: 0 } : u,
+        );
+      });
+    },
+    [queryClient, botId],
+  );
+
   const handleIncomingMessage = useCallback(
     (msg: Message) => {
       const userId = msg.userId || msg.user?.id;
@@ -75,6 +87,7 @@ export function useUsers(botId: string | null, enabled = true) {
     refetch: query.refetch,
     updateUser,
     incrementUnread,
+    clearUnread,
     handleIncomingMessage,
   };
 }

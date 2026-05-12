@@ -17,6 +17,8 @@ export interface User {
 
 export interface Message {
   id: string;
+  /** Client-generated id used for optimistic UI reconciliation. */
+  clientMessageId?: string;
   content: string;
   sender: 'user' | 'admin';
   isRead: boolean;
@@ -24,6 +26,8 @@ export interface Message {
   photoUrl?: string | null;
   botId?: string;
   userId?: string;
+  /** Local-only delivery state for outgoing messages. */
+  status?: 'pending' | 'sent' | 'failed';
   user?: {
     id: string;
     telegramId?: number;

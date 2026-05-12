@@ -24,83 +24,82 @@ export class ChatService {
     private eventsGateway: EventsGateway,
   ) {}
 
-  // Helper to convert Date to ISO string
-  private toISOString(date: Date): string {
-    return date.toISOString();
-  }
-
-  // Helper to verify user has access to bot
-  private async verifyBotAccess(authUserId: string, userRole: UserRole, botId: string): Promise<void> {
-    // Super admin has access to all bots
-    if (userRole === UserRole.SUPER_ADMIN) {
-      return;
-    }
-
-    // Regular admin must be assigned to the bot
+  private async verifyBotAccess(
+    authUserId: string,
+    userRole: UserRole,
+    botId: string,
+  ): Promise<void> {
+    if (userRole === UserRole.SUPER_ADMIN) return;
     const botUser = await this.botUserRepository.findOne({
       where: { authUserId, botId },
     });
-
     if (!botUser) {
       throw new ForbiddenException('You do not have access to this bot');
     }
   }
 
-  // Helper to get all bot IDs accessible by user
-  private async getAccessibleBotIds(authUserId: string, userRole: UserRole): Promise<string[]> {
+  private async getAccessibleBotIds(
+    authUserId: string,
+    userRole: UserRole,
+  ): Promise<string[]> {
     if (userRole === UserRole.SUPER_ADMIN) {
       const allBots = await this.botRepository.find();
-      return allBots.map(bot => bot.id);
+      return allBots.map((bot) => bot.id);
     }
-
-    const botUsers = await this.botUserRepository.find({
-      where: { authUserId },
-      relations: ['bot'],
-    });
-    
-    return botUsers.map(bu => bu.botId);
+    const botUsers = await this.botUserRepository.find({ where: { authUserId } });
+    return botUsers.map((bu) => bu.botId);
   }
 
+  /**
+   * Aggregate users + last message + unread count without N+1.
+   */
   async getAllUsers(authUserId: string, userRole: UserRole, botId?: string) {
-    // If botId specified, verify access
+    let botIds: string[];
     if (botId) {
       await this.verifyBotAccess(authUserId, userRole, botId);
-      
-      const users = await this.userRepository.find({
-        where: { botId },
-        relations: ['messages', 'bot'],
-        order: { updatedAt: 'DESC' },
-      });
-
-      return this.mapUsersWithMessages(users);
+      botIds = [botId];
+    } else {
+      botIds = await this.getAccessibleBotIds(authUserId, userRole);
     }
 
-    // No botId specified - return users from all accessible bots
-    const accessibleBotIds = await this.getAccessibleBotIds(authUserId, userRole);
-    
-    if (accessibleBotIds.length === 0) {
-      return [];
-    }
+    if (botIds.length === 0) return [];
 
     const users = await this.userRepository.find({
-      where: { botId: In(accessibleBotIds) },
-      relations: ['messages', 'bot'],
+      where: { botId: In(botIds) },
+      relations: ['bot'],
       order: { updatedAt: 'DESC' },
     });
 
-    return this.mapUsersWithMessages(users);
-  }
+    if (users.length === 0) return [];
 
-  private mapUsersWithMessages(users: User[]) {
-    const mappedUsers = users.map(user => {
-      const unreadCount = user.messages.filter(
-        m => m.sender === MessageSender.USER && !m.isRead
-      ).length;
-      
-      const lastMessage = user.messages.sort(
-        (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
-      )[0];
+    const userIds = users.map((u) => u.id);
 
+    const unreadRows = await this.messageRepository
+      .createQueryBuilder('m')
+      .select('m.userId', 'userId')
+      .addSelect('COUNT(*)', 'count')
+      .where('m.userId IN (:...userIds)', { userIds })
+      .andWhere('m.sender = :sender', { sender: MessageSender.USER })
+      .andWhere('m.isRead = false')
+      .groupBy('m.userId')
+      .getRawMany();
+
+    const unreadMap = new Map<string, number>(
+      unreadRows.map((r) => [r.userId, parseInt(r.count, 10)]),
+    );
+
+    const lastMessages = await this.messageRepository
+      .createQueryBuilder('m')
+      .distinctOn(['m.userId'])
+      .where('m.userId IN (:...userIds)', { userIds })
+      .orderBy('m.userId')
+      .addOrderBy('m.createdAt', 'DESC')
+      .getMany();
+
+    const lastMap = new Map<string, Message>(lastMessages.map((m) => [m.userId, m]));
+
+    const mapped = users.map((user) => {
+      const last = lastMap.get(user.id);
       return {
         id: user.id,
         telegramId: user.telegramId,
@@ -109,202 +108,166 @@ export class ChatService {
         username: user.username,
         botId: user.botId,
         botName: user.bot?.botName,
-        unreadCount,
-        lastMessage: lastMessage ? {
-          content: lastMessage.content,
-          createdAt: this.toISOString(lastMessage.createdAt),
-          sender: lastMessage.sender,
-        } : null,
-        updatedAt: this.toISOString(user.updatedAt),
+        unreadCount: unreadMap.get(user.id) ?? 0,
+        lastMessage: last
+          ? {
+              content: last.content,
+              createdAt: last.createdAt.toISOString(),
+              sender: last.sender,
+            }
+          : null,
+        updatedAt: user.updatedAt.toISOString(),
       };
     });
 
-    // Sort by lastMessage createdAt (newest first)
-    return mappedUsers.sort((a, b) => {
-      const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
-      const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
-      return bTime - aTime;
+    return mapped.sort((a, b) => {
+      const aT = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : 0;
+      const bT = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : 0;
+      if (aT !== bT) return bT - aT;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
   }
 
-  async getUserMessages(authUserId: string, userRole: UserRole, userId: string, limit: number = 20, offset: number = 0, search?: string) {
-    // Get user to check which bot they belong to
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: ['bot'],
-    });
+  async getUserMessages(
+    authUserId: string,
+    userRole: UserRole,
+    userId: string,
+    limit = 20,
+    offset = 0,
+    search?: string,
+  ) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Verify access to this user's bot
     await this.verifyBotAccess(authUserId, userRole, user.botId);
 
-    // Get total count
-    const queryBuilder = this.messageRepository
+    const qb = this.messageRepository
       .createQueryBuilder('message')
-      .leftJoinAndSelect('message.user', 'user')
       .where('message.userId = :userId', { userId })
       .andWhere('message.botId = :botId', { botId: user.botId });
 
-    // Add search filter if provided
     if (search) {
-      queryBuilder.andWhere('message.content ILIKE :search', { search: `%${search}%` });
+      qb.andWhere('message.content ILIKE :search', { search: `%${search}%` });
     }
 
-    const total = await queryBuilder.getCount();
+    const total = await qb.getCount();
 
-    // Get paginated messages (DESC order for latest first, then reverse for chat display)
-    const messages = await queryBuilder
+    const messages = await qb
       .orderBy('message.createdAt', 'DESC')
       .skip(offset)
       .take(limit)
       .getMany();
 
-    // Reverse to show oldest first in chat
-    const reversedMessages = messages.reverse();
+    const reversed = messages.reverse();
 
     return {
-      messages: reversedMessages.map(m => ({
+      messages: reversed.map((m) => ({
         id: m.id,
         content: m.content,
         sender: m.sender,
         isRead: m.isRead,
-        createdAt: this.toISOString(m.createdAt),
+        createdAt: m.createdAt.toISOString(),
         photoUrl: m.photoUrl,
-        user: {
-          id: m.user.id,
-          firstName: m.user.firstName,
-          lastName: m.user.lastName,
-          username: m.user.username,
-        },
+        userId: m.userId,
+        botId: m.botId,
       })),
       total,
       hasMore: offset + limit < total,
     };
   }
 
-  async sendMessage(authUserId: string, userRole: UserRole, userId: string, content: string, photoUrl?: string) {
-    // Get user to check which bot they belong to
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-      relations: ['bot'],
-    });
+  async sendMessage(
+    authUserId: string,
+    userRole: UserRole,
+    userId: string,
+    content: string,
+    photoUrl?: string,
+    clientMessageId?: string,
+  ) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Verify access to this user's bot
     await this.verifyBotAccess(authUserId, userRole, user.botId);
 
     const message = await this.multiBotService.sendMessageToUser(
       user.botId,
       user.telegramId,
       content,
-      photoUrl
+      photoUrl,
     );
-    
-    if (!message) {
-      throw new Error('Failed to send message');
-    }
 
-    // Return with ISO timestamp
+    if (!message) throw new Error('Failed to send message');
+
     return {
       id: message.id,
+      clientMessageId,
       content: message.content,
       sender: message.sender,
       isRead: message.isRead,
-      createdAt: this.toISOString(message.createdAt),
+      createdAt: message.createdAt.toISOString(),
       userId: message.userId,
+      botId: user.botId,
       photoUrl: message.photoUrl,
     };
   }
 
   async getStats(authUserId: string, userRole: UserRole, botId?: string) {
-    // If botId specified, verify access and get stats for that bot
     if (botId) {
       await this.verifyBotAccess(authUserId, userRole, botId);
-      
       const totalUsers = await this.userRepository.count({ where: { botId } });
       const totalMessages = await this.messageRepository.count({ where: { botId } });
       const unreadMessages = await this.messageRepository.count({
         where: { botId, sender: MessageSender.USER, isRead: false },
       });
-
-      return {
-        totalUsers,
-        totalMessages,
-        unreadMessages,
-        botId,
-      };
+      return { totalUsers, totalMessages, unreadMessages, botId };
     }
 
-    // No botId - aggregate stats from all accessible bots
     const accessibleBotIds = await this.getAccessibleBotIds(authUserId, userRole);
-    
     if (accessibleBotIds.length === 0) {
-      return {
-        totalUsers: 0,
-        totalMessages: 0,
-        unreadMessages: 0,
-      };
+      return { totalUsers: 0, totalMessages: 0, unreadMessages: 0 };
     }
 
-    const totalUsers = await this.userRepository.count({ 
-      where: { botId: In(accessibleBotIds) } 
-    });
-    const totalMessages = await this.messageRepository.count({ 
-      where: { botId: In(accessibleBotIds) } 
-    });
+    const where = { botId: In(accessibleBotIds) } as const;
+    const totalUsers = await this.userRepository.count({ where });
+    const totalMessages = await this.messageRepository.count({ where });
     const unreadMessages = await this.messageRepository.count({
-      where: { 
-        botId: In(accessibleBotIds),
-        sender: MessageSender.USER, 
-        isRead: false 
-      },
+      where: { ...where, sender: MessageSender.USER, isRead: false },
     });
-
-    return {
-      totalUsers,
-      totalMessages,
-      unreadMessages,
-    };
+    return { totalUsers, totalMessages, unreadMessages };
   }
 
-  async markUserMessagesAsRead(authUserId: string, userRole: UserRole, userId: string) {
-    // Get user to check which bot they belong to
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
+  async markUserMessagesAsRead(
+    authUserId: string,
+    userRole: UserRole,
+    userId: string,
+  ) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    // Verify access to this user's bot
     await this.verifyBotAccess(authUserId, userRole, user.botId);
 
     await this.messageRepository.update(
-      { userId, botId: user.botId, sender: MessageSender.USER, isRead: false },
-      { isRead: true }
+      {
+        userId,
+        botId: user.botId,
+        sender: MessageSender.USER,
+        isRead: false,
+      },
+      { isRead: true },
     );
+
+    // Sync other admin tabs viewing the same bot
+    this.eventsGateway.notifyUserRead(user.botId, userId);
+
     return { success: true };
   }
 
   async markAsRead(authUserId: string, userRole: UserRole, messageId: string) {
-    // Get message to check which bot it belongs to
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
-      relations: ['user'],
     });
+    if (!message) throw new NotFoundException('Message not found');
 
-    if (!message) {
-      throw new NotFoundException('Message not found');
-    }
-
-    // Verify access to this message's bot
     await this.verifyBotAccess(authUserId, userRole, message.botId);
 
     await this.messageRepository.update(messageId, { isRead: true });

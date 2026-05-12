@@ -76,11 +76,12 @@ export function sendMessage(
   userId: string,
   content: string,
   photoUrl?: string,
+  clientMessageId?: string,
 ): Promise<Message> {
   return apiFetch<Message>(`${API_URL}/api/chats/users/${userId}/messages`, {
     method: 'POST',
     headers: getAuthHeaders(),
-    body: JSON.stringify({ content, photoUrl }),
+    body: JSON.stringify({ content, photoUrl, clientMessageId }),
   });
 }
 

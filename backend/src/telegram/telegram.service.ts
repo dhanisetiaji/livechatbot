@@ -149,11 +149,12 @@ export class TelegramService {
     }
 
     // Notify admin dashboard via WebSocket
-    this.eventsGateway.notifyNewMessage({
+    const botId = user.botId || 'default';
+    this.eventsGateway.notifyNewMessage(botId, {
       id: message.id,
       content: message.content,
       sender: message.sender,
-      createdAt: this.toWIB(message.createdAt),
+      createdAt: message.createdAt.toISOString(),
       userId: user.id,
       photoUrl: photoUrl,
       user: {
